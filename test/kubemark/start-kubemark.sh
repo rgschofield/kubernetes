@@ -22,32 +22,64 @@ set -o pipefail
 
 TMP_ROOT="$(dirname "${BASH_SOURCE}")/../.."
 KUBE_ROOT=$(readlink -e ${TMP_ROOT} 2> /dev/null || perl -MCwd -e 'print Cwd::abs_path shift' ${TMP_ROOT})
+color_yellow='\033[1;33m'
+color_norm='\033[0m'
+color_blue='\033[1;34m'
+color_red='\033[1;31m'
+color_green='\033[1;32m'
+color_cyan='\033[1;36m'
 
-source "${KUBE_ROOT}/test/kubemark/skeleton/util.sh"
-source "${KUBE_ROOT}/test/kubemark/cloud-provider-config.sh"
+
+function choose-cloud-provider {
+  echo -n -e "Which cloud provider do you wish to use? [iks/gce]${color_cyan}>${color_norm} "
+  read CLOUD_PROVIDER
+  if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+    echo -e "${color_yellow}CLOUD PROVIDER SET: IKS${color_norm}"
+  elif [ "${CLOUD_PROVIDER}" = "gce" ]; then
+    echo -e "${color_yellow}CLOUD PROVIDER SET: GCE${color_norm}"
+  else
+    echo -e "${color_red}Invalid response, please try again:${color_norm}"
+    choose-cloud-provider
+  fi
+}
+
+# Complete cloud-provider specific setup
+choose-cloud-provider
+if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+  # IKS spedific setup
+  KUBECTL=kubectl
+elif [ "${CLOUD_PROVIDER}" = "gce" ]; then
+  # GCE specific setup
+  source "${KUBE_ROOT}/test/kubemark/skeleton/util.sh"
+  source "${KUBE_ROOT}/test/kubemark/cloud-provider-config.sh"
+  source "${KUBE_ROOT}/cluster/kubemark/util.sh"
+  KUBECTL="${KUBE_ROOT}/cluster/kubectl.sh"
+
+  # hack/lib/init.sh will ovewrite ETCD_VERSION if this is unset
+  # what what is default in hack/lib/etcd.sh
+  # To avoid it, if it is empty, we set it to 'avoid-overwrite' and
+  # clean it after that.
+  if [ -z "${ETCD_VERSION:-}" ]; then
+    ETCD_VERSION="avoid-overwrite"
+  fi
+  source "${KUBE_ROOT}/hack/lib/init.sh"
+  if [ "${ETCD_VERSION:-}" == "avoid-overwrite" ]; then
+    ETCD_VERSION=""
+  fi
+
+  # Generate a random 6-digit alphanumeric tag for the kubemark image.
+  # Used to uniquify image builds across different invocations of this script.
+  KUBEMARK_IMAGE_TAG=$(head /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
+else
+  echo "Cloud provider error has occurred: Invalid provider"
+  exit 1
+fi
+
 source "${KUBE_ROOT}/test/kubemark/${CLOUD_PROVIDER}/util.sh"
 source "${KUBE_ROOT}/cluster/kubemark/${CLOUD_PROVIDER}/config-default.sh"
-source "${KUBE_ROOT}/cluster/kubemark/util.sh"
 
-# hack/lib/init.sh will ovewrite ETCD_VERSION if this is unset
-# what what is default in hack/lib/etcd.sh
-# To avoid it, if it is empty, we set it to 'avoid-overwrite' and
-# clean it after that.
-if [ -z "${ETCD_VERSION:-}" ]; then
-  ETCD_VERSION="avoid-overwrite"
-fi
-source "${KUBE_ROOT}/hack/lib/init.sh"
-if [ "${ETCD_VERSION:-}" == "avoid-overwrite" ]; then
-  ETCD_VERSION=""
-fi
-
-KUBECTL="${KUBE_ROOT}/cluster/kubectl.sh"
 KUBEMARK_DIRECTORY="${KUBE_ROOT}/test/kubemark"
 RESOURCE_DIRECTORY="${KUBEMARK_DIRECTORY}/resources"
-
-# Generate a random 6-digit alphanumeric tag for the kubemark image.
-# Used to uniquify image builds across different invocations of this script.
-KUBEMARK_IMAGE_TAG=$(head /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
 
 # Write all environment variables that we need to pass to the kubemark master,
 # locally to the file ${RESOURCE_DIRECTORY}/kubemark-master-env.sh.
@@ -274,7 +306,108 @@ contexts:
   name: kubemark-context
 current-context: kubemark-context")
 
-  # Create kubeconfig for Kubeproxy.
+  if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+    # Create kubeconfig for Kubeproxy.
+  KUBEPROXY_KUBECONFIG_CONTENTS=$(echo "apiVersion: v1
+kind: Config
+users:
+- name: kube-proxy
+  user:
+    client-certificate-data: "${KUBELET_CERT_BASE64}"
+    client-key-data: "${KUBELET_KEY_BASE64}"
+clusters:
+- name: kubemark
+  cluster:
+    insecure-skip-tls-verify: true
+    server: https://${MASTER_IP}
+contexts:
+- context:
+    cluster: kubemark
+    user: kube-proxy
+  name: kubemark-context
+current-context: kubemark-context")
+
+  # Create kubeconfig for Heapster.
+  HEAPSTER_KUBECONFIG_CONTENTS=$(echo "apiVersion: v1
+kind: Config
+users:
+- name: heapster
+  user:
+    client-certificate-data: "${KUBELET_CERT_BASE64}"
+    client-key-data: "${KUBELET_KEY_BASE64}"
+clusters:
+- name: kubemark
+  cluster:
+    insecure-skip-tls-verify: true
+    server: https://${MASTER_IP}
+contexts:
+- context:
+    cluster: kubemark
+    user: heapster
+  name: kubemark-context
+current-context: kubemark-context")
+
+  # Create kubeconfig for Cluster Autoscaler.
+  CLUSTER_AUTOSCALER_KUBECONFIG_CONTENTS=$(echo "apiVersion: v1
+kind: Config
+users:
+- name: cluster-autoscaler
+  user:
+    client-certificate-data: "${KUBELET_CERT_BASE64}"
+    client-key-data: "${KUBELET_KEY_BASE64}"
+clusters:
+- name: kubemark
+  cluster:
+    insecure-skip-tls-verify: true
+    server: https://${MASTER_IP}
+contexts:
+- context:
+    cluster: kubemark
+    user: cluster-autoscaler
+  name: kubemark-context
+current-context: kubemark-context")
+
+  # Create kubeconfig for NodeProblemDetector.
+  NPD_KUBECONFIG_CONTENTS=$(echo "apiVersion: v1
+kind: Config
+users:
+- name: node-problem-detector
+  user:
+    client-certificate-data: "${KUBELET_CERT_BASE64}"
+    client-key-data: "${KUBELET_KEY_BASE64}"
+clusters:
+- name: kubemark
+  cluster:
+    insecure-skip-tls-verify: true
+    server: https://${MASTER_IP}
+contexts:
+- context:
+    cluster: kubemark
+    user: node-problem-detector
+  name: kubemark-context
+current-context: kubemark-context")
+
+  # Create kubeconfig for Kube DNS.
+  KUBE_DNS_KUBECONFIG_CONTENTS=$(echo "apiVersion: v1
+kind: Config
+users:
+- name: kube-dns
+  user:
+    client-certificate-data: "${KUBELET_CERT_BASE64}"
+    client-key-data: "${KUBELET_KEY_BASE64}"
+clusters:
+- name: kubemark
+  cluster:
+    insecure-skip-tls-verify: true
+    server: https://${MASTER_IP}
+contexts:
+- context:
+    cluster: kubemark
+    user: kube-dns
+  name: kubemark-context
+current-context: kubemark-context")
+  elif [ "${CLOUD_PROVIDER}" = "gce" ]; then
+    # Create kubeconfig for Kubeproxy.
   KUBEPROXY_KUBECONFIG_CONTENTS=$(echo "apiVersion: v1
 kind: Config
 users:
@@ -368,9 +501,29 @@ contexts:
     user: kube-dns
   name: kubemark-context
 current-context: kubemark-context")
+  else
+    echo -e "${color_red}Invalid cloud provider${color_norm}"
+    exit 1
+  fi
 
   # Create kubemark namespace.
-  "${KUBECTL}" create -f "${RESOURCE_DIRECTORY}/kubemark-ns.json"
+
+  if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+    spawn-config
+    if kubectl get ns | grep -Fq "kubemark"; then
+      kubectl delete ns kubemark
+      while kubectl get ns | grep -Fq "kubemark"
+      do
+        sleep 10
+      done
+    fi
+    "${KUBECTL}" create -f "${RESOURCE_DIRECTORY}/kubemark-ns.json"
+  elif [ "${CLOUD_PROVIDER}" = "gce" ]; then
+    "${KUBECTL}" create -f "${RESOURCE_DIRECTORY}/kubemark-ns.json"
+  else
+    echo "Cloud provider error has occurred: Invalid provider"
+    exit 1
+  fi
 
   # Create configmap for configuring hollow- kubelet, proxy and npd.
   "${KUBECTL}" create configmap "node-configmap" --namespace="kubemark" \
@@ -404,13 +557,21 @@ current-context: kubemark-context")
   # Cluster Autoscaler.
   if [[ "${ENABLE_KUBEMARK_CLUSTER_AUTOSCALER:-}" == "true" ]]; then
     echo "Setting up Cluster Autoscaler"
+    if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+      AS_PORT=""
+    elif [ "${CLOUD_PROVIDER}" = "gce" ]; then
+      AS_PORT=":443"
+    else
+      echo -e "${color_red}Invalid cloud provider, autoscaler port set to default.${color_norm}"
+      AS_PORT=""
+    fi
     KUBEMARK_AUTOSCALER_MIG_NAME="${KUBEMARK_AUTOSCALER_MIG_NAME:-${NODE_INSTANCE_PREFIX}-group}"
     KUBEMARK_AUTOSCALER_MIN_NODES="${KUBEMARK_AUTOSCALER_MIN_NODES:-0}"
-    KUBEMARK_AUTOSCALER_MAX_NODES="${KUBEMARK_AUTOSCALER_MAX_NODES:-10}"
+    KUBEMARK_AUTOSCALER_MAX_NODES="${KUBEMARK_AUTOSCALER_MAX_NODES:-${DESIRED_NODES}}"
     NUM_NODES=${KUBEMARK_AUTOSCALER_MAX_NODES}
     echo "Setting maximum cluster size to ${NUM_NODES}."
     KUBEMARK_MIG_CONFIG="autoscaling.k8s.io/nodegroup: ${KUBEMARK_AUTOSCALER_MIG_NAME}"
-    sed "s/{{master_ip}}/${MASTER_IP}/g" "${RESOURCE_DIRECTORY}/cluster-autoscaler_template.json" > "${RESOURCE_DIRECTORY}/addons/cluster-autoscaler.json"
+    sed "s/{{master_ip}}/${MASTER_IP}${AS_PORT}/g" "${RESOURCE_DIRECTORY}/cluster-autoscaler_template.json" > "${RESOURCE_DIRECTORY}/addons/cluster-autoscaler.json"
     sed -i'' -e "s/{{kubemark_autoscaler_mig_name}}/${KUBEMARK_AUTOSCALER_MIG_NAME}/g" "${RESOURCE_DIRECTORY}/addons/cluster-autoscaler.json"
     sed -i'' -e "s/{{kubemark_autoscaler_min_nodes}}/${KUBEMARK_AUTOSCALER_MIN_NODES}/g" "${RESOURCE_DIRECTORY}/addons/cluster-autoscaler.json"
     sed -i'' -e "s/{{kubemark_autoscaler_max_nodes}}/${KUBEMARK_AUTOSCALER_MAX_NODES}/g" "${RESOURCE_DIRECTORY}/addons/cluster-autoscaler.json"
@@ -423,6 +584,7 @@ current-context: kubemark-context")
   fi
 
   "${KUBECTL}" create -f "${RESOURCE_DIRECTORY}/addons" --namespace="kubemark"
+  set-registry-secrets
 
   # Create the replication controller for hollow-nodes.
   # We allow to override the NUM_REPLICAS when running Cluster Autoscaler.
@@ -451,6 +613,9 @@ current-context: kubemark-context")
 # Wait until all hollow-nodes are running or there is a timeout.
 function wait-for-hollow-nodes-to-run-or-timeout {
   echo -n "Waiting for all hollow-nodes to become Running"
+  if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+    LOCAL_KUBECONFIG=${KUBECONFIG}
+  fi
   start=$(date +%s)
   nodes=$("${KUBECTL}" --kubeconfig="${LOCAL_KUBECONFIG}" get node 2> /dev/null) || true
   ready=$(($(echo "${nodes}" | grep -v "NotReady" | wc -l) - 1))
@@ -469,6 +634,9 @@ function wait-for-hollow-nodes-to-run-or-timeout {
       else
         echo "Got error while trying to list hollow-nodes. Probably API server is down."
       fi
+      if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+        spawn-config
+      fi
       pods=$("${KUBECTL}" get pods -l name=hollow-node --namespace=kubemark) || true
       running=$(($(echo "${pods}" | grep "Running" | wc -l)))
       echo "${running} hollow-nodes are reported as 'Running'"
@@ -484,32 +652,65 @@ function wait-for-hollow-nodes-to-run-or-timeout {
 }
 
 ############################### Main Function ########################################
-detect-project &> /dev/null
 
-# Setup for master.
-echo -e "${color_yellow}STARTING SETUP FOR MASTER${color_norm}"
-find-release-tars
-create-master-environment-file
-create-master-instance-with-resources
-generate-pki-config
-wait-for-master-reachability
-write-pki-config-to-master
-write-local-kubeconfig
-copy-resource-files-to-master
-start-master-components
+# Cloud provider specific main function
+if [ "${CLOUD_PROVIDER}" = "iks" ]; then
+  # IKS spedific setup
+  # Create clusters and populate with hollow nodes
+  complete-login
+  build-kubemark-image
+  choose-clusters
+  generate-values
+  set-hollow-master
+  echo "Creating kube hollow node resources"
+  create-kube-hollow-node-resources
+  master-config
+  echo -e "${color_blue}EXECUTION COMPLETE${color_norm}"
 
-# Setup for hollow-nodes.
-echo ""
-echo -e "${color_yellow}STARTING SETUP FOR HOLLOW-NODES${color_norm}"
-if [[ "${KUBEMARK_BAZEL_BUILD:-}" =~ ^[yY]$ ]]; then
-  create-and-upload-hollow-node-image-bazel
+  # Check status of Kubemark
+  echo -e "${color_yellow}CHECKING STATUS${color_norm}"
+  wait-for-hollow-nodes-to-run-or-timeout
+  echo -e "Current registry namespace: ${KUBE_NAMESPACE}"
+
+  # Echo completion
+  echo ""
+  echo -e "${color_blue}SUCCESS${color_norm}"
+  clean-repo
+  exit 0
+
+elif [ "${CLOUD_PROVIDER}" = "gce" ]; then
+  # GCE specific setup
+  detect-project &> /dev/null
+  
+  # Setup for master.
+  echo -e "${color_yellow}STARTING SETUP FOR MASTER${color_norm}"
+  find-release-tars
+  create-master-environment-file
+  create-master-instance-with-resources
+  generate-pki-config
+  wait-for-master-reachability
+  write-pki-config-to-master
+  write-local-kubeconfig
+  copy-resource-files-to-master
+  start-master-components
+
+  # Setup for hollow-nodes.
+  echo ""
+  echo -e "${color_yellow}STARTING SETUP FOR HOLLOW-NODES${color_norm}"
+  if [[ "${KUBEMARK_BAZEL_BUILD:-}" =~ ^[yY]$ ]]; then
+    create-and-upload-hollow-node-image-bazel
+  else
+    create-and-upload-hollow-node-image
+  fi
+  create-kube-hollow-node-resources
+  wait-for-hollow-nodes-to-run-or-timeout
+
+  echo ""
+  echo "Master IP: ${MASTER_IP}"
+  echo "Password to kubemark master: ${KUBE_PASSWORD}"
+  echo "Kubeconfig for kubemark master is written in ${LOCAL_KUBECONFIG}"
+  
 else
-  create-and-upload-hollow-node-image
+  echo "Cloud provider error has occurred: Invalid provider"
+  exit 1
 fi
-create-kube-hollow-node-resources
-wait-for-hollow-nodes-to-run-or-timeout
-
-echo ""
-echo "Master IP: ${MASTER_IP}"
-echo "Password to kubemark master: ${KUBE_PASSWORD}"
-echo "Kubeconfig for kubemark master is written in ${LOCAL_KUBECONFIG}"
