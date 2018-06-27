@@ -18,7 +18,7 @@
 
 KUBE_ROOT=$(dirname "${BASH_SOURCE}")/../..
 
-source "${KUBE_ROOT}/test/kubemark/iks-config.sh"
+source "${KUBE_ROOT}/test/kubemark/iks/config.sh"
 source "${KUBE_ROOT}/test/kubemark/${CLOUD_PROVIDER}/util.sh"
 
 KUBECTL=kubectl
