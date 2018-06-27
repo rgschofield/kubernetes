@@ -6,7 +6,7 @@
 * Docker (Download here: https://www.docker.com/get-docker)
 ### Steps to run kubemark:
 1. Clone this repository: git@github.com:brandondr96/kubernetes.git
-2. Switch to the branch "stat-tester".
+2. Switch to the branch "stat_tester".
 3. Run ```bash iks-start-kubemark.sh```. This script will create all necessary resources, clusters, and namespaces for kubemark to run.
 4. Respond to the prompts as desired.
 
