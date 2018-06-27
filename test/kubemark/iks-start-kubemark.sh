@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2015 The Kubernetes Authors.
+# Copyright 2018 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ set -o pipefail
 TMP_ROOT="$(dirname "${BASH_SOURCE}")/../.."
 KUBE_ROOT=$(readlink -e ${TMP_ROOT} 2> /dev/null || perl -MCwd -e 'print Cwd::abs_path shift' ${TMP_ROOT})
 
-source "${KUBE_ROOT}/test/kubemark/iks-config.sh"
+source "${KUBE_ROOT}/test/kubemark/iks/config.sh"
 source "${KUBE_ROOT}/test/kubemark/${CLOUD_PROVIDER}/util.sh"
 
 KUBECTL="${KUBE_ROOT}/cluster/kubectl.sh"
@@ -286,6 +286,9 @@ function wait-for-hollow-nodes-to-run-or-timeout {
 }
 
 ############################### Main Function ########################################
+# In order for the cluster autoscalar to function, the template file must be changed so that the ":443"
+# is removed. This is because the port is already given with the MASTER_IP.
+
 
 # Create clusters and populate with hollow nodes
 complete-login
@@ -301,7 +304,6 @@ echo -e "${color_blue}EXECUTION COMPLETE${color_norm}"
 # Check status of Kubemark
 echo -e "${color_yellow}CHECKING STATUS${color_norm}"
 wait-for-hollow-nodes-to-run-or-timeout
-echo -e "Current registry namespace: ${KUBE_NAMESPACE}"
 
 # Celebrate
 echo ""

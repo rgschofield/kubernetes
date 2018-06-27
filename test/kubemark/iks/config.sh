@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2017 The Kubernetes Authors.
+# Copyright 2018 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ RANDGEN=$(dd if=/dev/urandom bs=64 count=1 2>/dev/null | base64 | tr -d "=+/" | 
 KUBE_NAMESPACE="kubemark_${RANDGEN}"
 KUBEMARK_IMAGE_REGISTRY="${KUBEMARK_IMAGE_REGISTRY:-registry.ng.bluemix.net/${KUBE_NAMESPACE}}"
 PROJECT_NAME="${PROJECT_NAME:-kubemark}"
-KUBEMARK_IMAGE_TAG="${KUBEMARK_IMAGE_TAG:-3}"
+KUBEMARK_IMAGE_TAG="${KUBEMARK_IMAGE_TAG:-1}"
 KUBEMARK_IMAGE_LOCATION="${KUBEMARK_IMAGE_LOCATION:-${KUBE_ROOT}/cluster/images/kubemark}"
 KUBEMARK_INIT_TAG="${KUBEMARK_INIT_TAG:-${PROJECT_NAME}:${KUBEMARK_IMAGE_TAG}}"
 CLUSTER_LOCATION="${CLUSTER_LOCATION:-wdc06}"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2017 The Kubernetes Authors.
+# Copyright 2018 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -60,15 +60,19 @@ function create-clusters {
 
 # Builds and pushes image to registry
 function push-image {
-	if ! bx cr namespaces | grep -Fq ${KUBE_NAMESPACE}; then
-		echo "Creating registry namespace"
-		bx cr namespace-add ${KUBE_NAMESPACE}
-		echo "bx cr namespace-rm ${KUBE_NAMESPACE}" >> ${RESOURCE_DIRECTORY}/iks-namespacelist.sh
+	if [ "${ISBUILD}" = "y" ]; then
+		if ! bx cr namespaces | grep -Fq ${KUBE_NAMESPACE}; then
+			echo "Creating registry namespace"
+			bx cr namespace-add ${KUBE_NAMESPACE}
+			echo "bx cr namespace-rm ${KUBE_NAMESPACE}" >> ${RESOURCE_DIRECTORY}/iks-namespacelist.sh
+		fi
+		docker build -t ${KUBEMARK_INIT_TAG} ${KUBEMARK_IMAGE_LOCATION}
+		docker tag ${KUBEMARK_INIT_TAG} ${KUBEMARK_IMAGE_REGISTRY}/${PROJECT_NAME}:${KUBEMARK_IMAGE_TAG}
+		docker push ${KUBEMARK_IMAGE_REGISTRY}/${PROJECT_NAME}:${KUBEMARK_IMAGE_TAG}
+		echo "Image pushed"
+	else
+		KUBEMARK_IMAGE_REGISTRY=$(echo "brandondr96")
 	fi
-	docker build -t ${KUBEMARK_INIT_TAG} ${KUBEMARK_IMAGE_LOCATION}
-	docker tag ${KUBEMARK_INIT_TAG} ${KUBEMARK_IMAGE_REGISTRY}/${PROJECT_NAME}:${KUBEMARK_IMAGE_TAG}
-	docker push ${KUBEMARK_IMAGE_REGISTRY}/${PROJECT_NAME}:${KUBEMARK_IMAGE_TAG}
-	echo "Image pushed"
 }
 
 # Allow user to use existing clusters if desired
@@ -101,13 +105,7 @@ function set-registry-secrets {
 function set-hollow-master {
 	echo -e "${color_yellow}CONFIGURING MASTER${color_norm}"
 	master-config
-	if [ "${USE_EXISTING}" = "y" ]; then
-		echo -e "${color_yellow}Enter name of hollow-node hosting cluster:${color_norm}"
-		read CUSTOM_NAME
-		MASTER_IP=$(cat `bx cs cluster-config ${CUSTOM_NAME} | grep export | awk -F "=" '{print $2}'` | grep server | awk -F "/" '{print $3}')
-	else
-		MASTER_IP=$(cat `bx cs cluster-config kubeMasterTester | grep export | awk -F "=" '{print $2}'` | grep server | awk -F "/" '{print $3}')
-	fi
+	MASTER_IP=$(cat $KUBECONFIG | grep server | awk -F "/" '{print $3}')
 }
 
 # Set up master cluster environment
@@ -147,7 +145,7 @@ function delete-clusters {
 # Login to cloud services
 function complete-login {
 	echo -e "${color_yellow}LOGGING INTO CLOUD SERVICES${color_norm}"
-	echo -n -e "Do you have a federated IBM cloud registry login? [y/N]${color_cyan}>${color_norm} "
+	echo -n -e "Do you have a federated IBM cloud login? [y/N]${color_cyan}>${color_norm} "
 	read ISFED
 	if [ "${ISFED}" = "y" ]; then
 		bx login --sso -a ${REGISTRY_LOGIN_URL}
@@ -163,15 +161,15 @@ function complete-login {
 # Generate values to fill the hollow-node configuration
 function generate-values {
 	echo "Generating values"
+	master-config
 	KUBECTL=kubectl
 	KUBEMARK_DIRECTORY="${KUBE_ROOT}/test/kubemark"
 	RESOURCE_DIRECTORY="${KUBEMARK_DIRECTORY}/resources"
 	TEST_CLUSTER_API_CONTENT_TYPE="bluemix" #Determine correct usage of this
-	CONFIGTEMP=`bx cs cluster-config kubeMasterTester --admin | awk -F "=" '{print $2}'`
-	CONFIGPATH=${CONFIGTEMP%/*}
+	CONFIGPATH=${KUBECONFIG%/*}
 	KUBELET_CERT_BASE64="${KUBELET_CERT_BASE64:-$(cat ${CONFIGPATH}/admin.pem | base64 | tr -d '\r\n')}"
 	KUBELET_KEY_BASE64="${KUBELET_KEY_BASE64:-$(cat ${CONFIGPATH}/admin-key.pem  | base64 | tr -d '\r\n')}"
-	CA_CERT_BASE64="${CA_CERT_BASE64:-$(cat ${CONFIGPATH}/ca-${CLUSTER_LOCATION}-kubeMasterTester.pem  | base64 | tr -d '\r\n')}"
+	CA_CERT_BASE64="${CA_CERT_BASE64:-$(cat `find ${CONFIGPATH} -name *ca*` | base64 | tr -d '\r\n')}"
 }
 
 # Build image for kubemark
