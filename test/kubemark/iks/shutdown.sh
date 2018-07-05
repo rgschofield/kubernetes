@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Copyright 2015 The Kubernetes Authors.
+# Copyright 2018 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,34 +14,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Script that destroys Kubemark cluster and deletes all master resources.
+# Script that destroys the clusters used, namespace, and deployment.
 
-KUBE_ROOT=$(dirname "${BASH_SOURCE}")/../..
-
-source "${KUBE_ROOT}/test/kubemark/cloud-provider-config.sh"
-
-if ls ${CLOUD_PROVIDER} | grep -Fq 'shutdown'; then
-	source "${KUBE_ROOT}/test/kubemark/${CLOUD_PROVIDER}/shutdown.sh"
-fi
-
-source "${KUBE_ROOT}/test/kubemark/skeleton/util.sh"
+source "${KUBE_ROOT}/test/kubemark/${CLOUD_PROVIDER}/config.sh"
 source "${KUBE_ROOT}/test/kubemark/${CLOUD_PROVIDER}/util.sh"
-source "${KUBE_ROOT}/cluster/kubemark/${CLOUD_PROVIDER}/config-default.sh"
-source "${KUBE_ROOT}/cluster/kubemark/util.sh"
 
-KUBECTL="${KUBE_ROOT}/cluster/kubectl.sh"
+KUBECTL=kubectl
 KUBEMARK_DIRECTORY="${KUBE_ROOT}/test/kubemark"
 RESOURCE_DIRECTORY="${KUBEMARK_DIRECTORY}/resources"
 
-detect-project &> /dev/null
+# Login to cloud services
+complete-login
 
+# Remove resources created for kubemark
+echo -e "${color_yellow}REMOVING RESOURCES${color_norm}"
+spawn-config
 "${KUBECTL}" delete -f "${RESOURCE_DIRECTORY}/addons" &> /dev/null || true
 "${KUBECTL}" delete -f "${RESOURCE_DIRECTORY}/hollow-node.yaml" &> /dev/null || true
 "${KUBECTL}" delete -f "${RESOURCE_DIRECTORY}/kubemark-ns.json" &> /dev/null || true
+rm -rf "${RESOURCE_DIRECTORY}/addons" 
+	"${RESOURCE_DIRECTORY}/hollow-node.yaml" &> /dev/null || true
 
-rm -rf "${RESOURCE_DIRECTORY}/addons" \
-	"${RESOURCE_DIRECTORY}/kubeconfig.kubemark" \
-	"${RESOURCE_DIRECTORY}/hollow-node.yaml" \
-	"${RESOURCE_DIRECTORY}/kubemark-master-env.sh"  &> /dev/null || true
+# Remove clusters, namespaces, and deployments
+delete-clusters
+bash ${RESOURCE_DIRECTORY}/iks-namespacelist.sh
+rm -f ${RESOURCE_DIRECTORY}/iks-namespacelist.sh
+rm -rf ${RESOURCE_DIRECTORY}/addons
+rm -f ${RESOURCE_DIRECTORY}/hollow-node.yaml
 
-delete-master-instance-and-resources
+# Echoing completion of kubemark cleanup
+echo -e "${color_blue}EXECUTION COMPLETE${color_norm}"
+exit 0
