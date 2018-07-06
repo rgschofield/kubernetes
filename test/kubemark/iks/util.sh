@@ -169,7 +169,7 @@ function generate-values {
 	CONFIGPATH=${KUBECONFIG%/*}
 	KUBELET_CERT_BASE64="${KUBELET_CERT_BASE64:-$(cat ${CONFIGPATH}/admin.pem | base64 | tr -d '\r\n')}"
 	KUBELET_KEY_BASE64="${KUBELET_KEY_BASE64:-$(cat ${CONFIGPATH}/admin-key.pem  | base64 | tr -d '\r\n')}"
-	CA_CERT_BASE64="${CA_CERT_BASE64:-$(cat `find ${CONFIGPATH} -name *ca*` | base64 | tr -d '\r\n')}"
+	CA_CERT_BASE64="${CA_CERT_BASE64:-$(cat `find ${CONFIGPATH} -name '*ca*'` | base64 | tr -d '\r\n')}"
 }
 
 # Build image for kubemark
